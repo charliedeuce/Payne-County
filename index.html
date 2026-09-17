@@ -201,6 +201,16 @@
   }
   .search-result:hover{ border-color:var(--accent); }
   .empty-hint{ font-size:12px; color:var(--text-dim); font-style:italic; }
+
+  .attr-popup{ max-height:240px; overflow-y:auto; }
+  .attr-popup table{ border-collapse:collapse; width:100%; }
+  .attr-popup td{ padding:3px 8px 3px 0; vertical-align:top; font-size:12px; }
+  .attr-popup td.attr-label{
+    color:var(--text-dim); white-space:nowrap; font-family:var(--mono); font-size:10.5px;
+    padding-top:5px;
+  }
+  .attr-popup td.attr-value{ color:var(--text); font-weight:600; }
+  .attr-popup tr:not(:last-child) td{ border-bottom:1px solid var(--line); }
 </style>
 </head>
 <body>
@@ -322,19 +332,52 @@
   function newId(){ return 'l' + (idCounter++) + '_' + Date.now().toString(36); }
 
   /* ---------------- reference layers (esri-leaflet) ---------------- */
+  function attributePopupHtml(props){
+    var keys = Object.keys(props || {});
+    if (!keys.length) return '<div class="attr-popup"><em>No attribute data on this feature.</em></div>';
+    var ownerKeys = keys.filter(function(k){ return /owner/i.test(k); });
+    var addrKeys  = keys.filter(function(k){ return /(situs|site|mail).*addr|addr.*(situs|site|mail)|^address$/i.test(k); });
+    var idKeys    = keys.filter(function(k){ return /parcel|apn|pin\b|account/i.test(k); });
+    var used = ownerKeys.concat(addrKeys, idKeys);
+    var rest = keys.filter(function(k){ return used.indexOf(k) === -1; });
+    var order = used.concat(rest);
+    var rows = order.map(function(k){
+      var v = props[k];
+      if (v === null || v === undefined || v === '') return '';
+      return '<tr><td class="attr-label">' + escapeHtml(humanizeField(k)) + '</td><td class="attr-value">' + escapeHtml(String(v)) + '</td></tr>';
+    }).filter(Boolean).join('');
+    return '<div class="attr-popup"><table>' + rows + '</table></div>';
+  }
+
+  function humanizeField(k){
+    return k.replace(/_/g,' ').replace(/\b\w/g, function(c){ return c.toUpperCase(); });
+  }
+
   function guessEsriLayer(url){
-    // If URL ends in /MapServer or /FeatureServer (no numeric id), use dynamicMapLayer.
-    // If it ends in a numeric layer id, use featureLayer (works for both server types).
+    // If URL ends in /MapServer or /FeatureServer (no numeric id), use dynamicMapLayer —
+    // this renders as a picture with no per-feature click data, so owner lookups won't work on it.
+    // If it ends in a numeric layer id, use featureLayer, which supports clicking a parcel
+    // to see its attributes (owner, address, parcel ID, etc. — whatever the county publishes).
     var trimmed = url.replace(/\/+$/,'');
     var m = trimmed.match(/\/(\d+)$/);
     if (m) {
-      return L.esri.featureLayer({ url: trimmed });
+      return L.esri.featureLayer({
+        url: trimmed,
+        onEachFeature: function(feature, layer){
+          layer.bindPopup(attributePopupHtml(feature.properties), { maxWidth:300, maxHeight:260 });
+        }
+      });
     }
     if (/MapServer$/i.test(trimmed)) {
       return L.esri.dynamicMapLayer({ url: trimmed });
     }
     // fallback: try featureLayer directly
-    return L.esri.featureLayer({ url: trimmed });
+    return L.esri.featureLayer({
+      url: trimmed,
+      onEachFeature: function(feature, layer){
+        layer.bindPopup(attributePopupHtml(feature.properties), { maxWidth:300, maxHeight:260 });
+      }
+    });
   }
 
   function addReferenceLayer(name, url, visible, skipSave){
