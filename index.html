@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Payne County Jurisdiction Map</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+
+<style>
+  :root{
+    --ink:#0f1417;
+    --panel:#161d22;
+    --panel-raised:#1d262c;
+    --line:#2a353c;
+    --text:#dbe4e8;
+    --text-dim:#8fa1a9;
+    --accent:#3fa7a0;
+    --accent-bright:#5fd1c8;
+    --warn:#d97757;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;}
+  body{
+    font-family:var(--sans);
+    background:var(--ink);
+    color:var(--text);
+    display:flex;
+    overflow:hidden;
+  }
+
+  /* ---------- layout ---------- */
+  #app{ display:flex; width:100%; height:100%; }
+  #map{ flex:1; height:100%; background:#0a0d0f; }
+  #sidebar{
+    width:340px;
+    min-width:340px;
+    height:100%;
+    background:var(--panel);
+    border-right:1px solid var(--line);
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+  }
+  #sidebar-scroll{
+    overflow-y:auto;
+    flex:1;
+    padding:0 0 24px 0;
+  }
+  @media (max-width: 760px){
+    #app{ flex-direction:column; }
+    #sidebar{ width:100%; min-width:0; height:44vh; order:2; border-right:none; border-top:1px solid var(--line); }
+    #map{ height:56vh; order:1; }
+  }
+
+  /* ---------- header ---------- */
+  header{
+    padding:16px 18px 14px 18px;
+    border-bottom:1px solid var(--line);
+  }
+  header h1{
+    font-size:15px;
+    letter-spacing:0.2px;
+    margin:0 0 2px 0;
+    font-weight:600;
+    color:var(--text);
+  }
+  header p{
+    margin:0;
+    font-size:12px;
+    color:var(--text-dim);
+    font-family:var(--mono);
+  }
+
+  /* ---------- sections ---------- */
+  .section{
+    padding:14px 18px;
+    border-bottom:1px solid var(--line);
+  }
+  .section h2{
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:0.6px;
+    color:var(--text-dim);
+    margin:0 0 10px 0;
+    font-weight:600;
+  }
+  .section p.help{
+    font-size:12px;
+    color:var(--text-dim);
+    line-height:1.5;
+    margin:6px 0 10px 0;
+  }
+
+  /* ---------- buttons / inputs ---------- */
+  button{
+    font-family:var(--sans);
+    cursor:pointer;
+    border:1px solid var(--line);
+    background:var(--panel-raised);
+    color:var(--text);
+    border-radius:6px;
+    padding:7px 10px;
+    font-size:12.5px;
+    transition:background .12s, border-color .12s;
+  }
+  button:hover{ background:#243039; border-color:#38474f; }
+  button.primary{
+    background:var(--accent);
+    border-color:var(--accent);
+    color:#08211f;
+    font-weight:600;
+  }
+  button.primary:hover{ background:var(--accent-bright); border-color:var(--accent-bright); }
+  button.ghost{ background:transparent; }
+  button.danger{ color:#f0a08a; }
+  button.small{ padding:4px 7px; font-size:11px; border-radius:5px; }
+  button:disabled{ opacity:0.4; cursor:not-allowed; }
+
+  input[type="text"], input[type="url"], input[type="color"], textarea, select{
+    width:100%;
+    background:var(--ink);
+    border:1px solid var(--line);
+    color:var(--text);
+    border-radius:6px;
+    padding:7px 8px;
+    font-size:12.5px;
+    font-family:var(--sans);
+  }
+  input[type="color"]{ padding:2px; height:30px; width:44px; flex:none; }
+  textarea{ resize:vertical; min-height:52px; font-family:var(--sans); }
+  input::placeholder, textarea::placeholder{ color:#5a6a72; }
+
+  .row{ display:flex; gap:8px; align-items:center; }
+  .row + .row{ margin-top:8px; }
+  .grow{ flex:1; min-width:0; }
+
+  /* ---------- layer list items ---------- */
+  .layer-item{
+    background:var(--panel-raised);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:9px 10px;
+    margin-bottom:8px;
+  }
+  .layer-item.active{ border-color:var(--accent); }
+  .layer-top{ display:flex; align-items:center; gap:8px; }
+  .swatch{
+    width:12px; height:12px; border-radius:3px; flex:none;
+    border:1px solid rgba(255,255,255,.25);
+  }
+  .layer-name{
+    flex:1; min-width:0; font-size:13px; font-weight:600;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .layer-meta{ font-size:11px; color:var(--text-dim); font-family:var(--mono); margin-top:3px; }
+  .layer-actions{ display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
+  .count-badge{
+    font-family:var(--mono); font-size:10.5px; color:var(--text-dim);
+    background:var(--ink); border:1px solid var(--line); border-radius:10px;
+    padding:1px 7px;
+  }
+
+  /* toggle switch */
+  .switch{ position:relative; width:32px; height:18px; flex:none; }
+  .switch input{ opacity:0; width:0; height:0; }
+  .slider{
+    position:absolute; inset:0; background:#333f46; border-radius:20px; cursor:pointer; transition:.15s;
+  }
+  .slider:before{
+    content:""; position:absolute; width:14px; height:14px; left:2px; top:2px;
+    background:#cfd9dd; border-radius:50%; transition:.15s;
+  }
+  .switch input:checked + .slider{ background:var(--accent); }
+  .switch input:checked + .slider:before{ transform:translateX(14px); background:#08211f; }
+
+  /* ---------- footer / status ---------- */
+  #status{
+    padding:10px 18px;
+    font-size:11px;
+    color:var(--text-dim);
+    font-family:var(--mono);
+    border-top:1px solid var(--line);
+    background:var(--panel);
+  }
+
+  /* ---------- leaflet overrides ---------- */
+  .leaflet-container{ background:#0a0d0f; font-family:var(--sans); }
+  .leaflet-popup-content-wrapper{ background:var(--panel-raised); color:var(--text); border-radius:8px; }
+  .leaflet-popup-tip{ background:var(--panel-raised); }
+  .leaflet-popup-content{ margin:12px 14px; font-size:13px; }
+  .leaflet-popup-content input, .leaflet-popup-content textarea{ margin-top:4px; }
+  .leaflet-control-attribution{ background:rgba(15,20,23,0.75) !important; color:var(--text-dim) !important; }
+  .leaflet-control-attribution a{ color:var(--accent-bright) !important; }
+  .search-result{
+    background:var(--panel-raised); border:1px solid var(--line); border-radius:8px;
+    padding:8px; font-size:12.5px; margin-top:6px; cursor:pointer;
+  }
+  .search-result:hover{ border-color:var(--accent); }
+  .empty-hint{ font-size:12px; color:var(--text-dim); font-style:italic; }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div id="sidebar">
+    <header>
+      <h1>Payne County Jurisdiction Map</h1>
+      <p id="coord-readout">lat --, lon --</p>
+    </header>
+
+    <div id="sidebar-scroll">
+
+      <!-- SEARCH -->
+      <div class="section">
+        <h2>Find a location</h2>
+        <div class="row">
+          <input type="text" id="search-input" class="grow" placeholder="Address, town, intersection…" />
+          <button id="search-btn">Go</button>
+        </div>
+        <div id="search-results"></div>
+      </div>
+
+      <!-- REFERENCE LAYERS -->
+      <div class="section">
+        <h2>County reference layers</h2>
+        <p class="help">Live layers pulled from the assessor's public GIS server. Paste in an ArcGIS REST layer URL to add more — open the URL in a browser first to confirm it loads a JSON page.</p>
+        <div id="ref-layer-list"></div>
+        <div class="row">
+          <input type="text" id="ref-name-input" class="grow" placeholder="Layer name (e.g. Parcels)" />
+        </div>
+        <div class="row">
+          <input type="url" id="ref-url-input" class="grow" placeholder="https://…/MapServer/0" />
+        </div>
+        <div class="row">
+          <button id="ref-add-btn" class="primary grow">Add reference layer</button>
+        </div>
+      </div>
+
+      <!-- JURISDICTION LAYERS -->
+      <div class="section">
+        <h2>Jurisdiction layers</h2>
+        <p class="help">Pick a layer below, then draw. Click any shape afterward to name it or edit notes.</p>
+        <div id="juris-layer-list"></div>
+        <div class="row">
+          <input type="text" id="juris-name-input" class="grow" placeholder="New layer name…" />
+          <input type="color" id="juris-color-input" value="#e0b04a" />
+        </div>
+        <div class="row">
+          <button id="juris-add-btn" class="primary grow">Add layer</button>
+        </div>
+      </div>
+
+      <!-- DATA -->
+      <div class="section">
+        <h2>Backup &amp; transfer</h2>
+        <p class="help">Your drawn jurisdiction shapes and layer setup auto-save to this browser. Export regularly and keep the file somewhere safe — browser storage can be cleared and doesn't move between computers.</p>
+        <div class="row">
+          <button id="export-btn" class="grow">Export backup (.json)</button>
+        </div>
+        <div class="row">
+          <button id="import-btn" class="grow">Import backup</button>
+          <input type="file" id="import-file" accept=".json" style="display:none" />
+        </div>
+      </div>
+
+    </div>
+
+    <div id="status">Ready.</div>
+  </div>
+
+  <div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+<script src="https://unpkg.com/esri-leaflet@3.0.12/dist/esri-leaflet.js"></script>
+
+<script>
+(function(){
+  "use strict";
+
+  var STORAGE_KEY = "jurisdiction-map-v1";
+
+  /* ---------------- map + basemaps ---------------- */
+  var map = L.map('map', { zoomControl:true }).setView([36.155, -97.06], 10); // Payne County, OK
+
+  var osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom:19,
+    attribution:'&copy; OpenStreetMap contributors'
+  }).addTo(map);
+
+  var satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom:19,
+    attribution:'Tiles &copy; Esri'
+  });
+
+  L.control.layers({ "Street map": osm, "Satellite": satellite }, null, { position:'topright', collapsed:true }).addTo(map);
+  L.control.scale({ position:'bottomleft', imperial:true, metric:false }).addTo(map);
+
+  map.on('mousemove', function(e){
+    document.getElementById('coord-readout').textContent =
+      'lat ' + e.latlng.lat.toFixed(5) + ', lon ' + e.latlng.lng.toFixed(5);
+  });
+
+  function setStatus(msg){
+    document.getElementById('status').textContent = msg;
+  }
+
+  /* ---------------- state ---------------- */
+  // referenceLayers: [{id, name, url, visible, leafletLayer}]
+  // jurisLayers: [{id, name, color, visible, featureGroup, geojson}]
+  var referenceLayers = [];
+  var jurisLayers = [];
+  var activeJurisId = null;
+  var drawControl = null;
+  var idCounter = 1;
+
+  function newId(){ return 'l' + (idCounter++) + '_' + Date.now().toString(36); }
+
+  /* ---------------- reference layers (esri-leaflet) ---------------- */
+  function guessEsriLayer(url){
+    // If URL ends in /MapServer or /FeatureServer (no numeric id), use dynamicMapLayer.
+    // If it ends in a numeric layer id, use featureLayer (works for both server types).
+    var trimmed = url.replace(/\/+$/,'');
+    var m = trimmed.match(/\/(\d+)$/);
+    if (m) {
+      return L.esri.featureLayer({ url: trimmed });
+    }
+    if (/MapServer$/i.test(trimmed)) {
+      return L.esri.dynamicMapLayer({ url: trimmed });
+    }
+    // fallback: try featureLayer directly
+    return L.esri.featureLayer({ url: trimmed });
+  }
+
+  function addReferenceLayer(name, url, visible, skipSave){
+    var rec = { id:newId(), name:name, url:url, visible: visible !== false };
+    try {
+      rec.leafletLayer = guessEsriLayer(url);
+      rec.leafletLayer.on('requesterror', function(e){
+        setStatus('Could not load "' + name + '" — check the URL. (' + (e.error && e.error.message ? e.error.message : 'request error') + ')');
+      });
+      if (rec.visible) rec.leafletLayer.addTo(map);
+    } catch(err){
+      setStatus('Error adding layer "' + name + '": ' + err.message);
+    }
+    referenceLayers.push(rec);
+    renderReferenceList();
+    if (!skipSave) saveState();
+  }
+
+  function removeReferenceLayer(id){
+    var rec = referenceLayers.find(function(r){ return r.id === id; });
+    if (!rec) return;
+    if (rec.leafletLayer) map.removeLayer(rec.leafletLayer);
+    referenceLayers = referenceLayers.filter(function(r){ return r.id !== id; });
+    renderReferenceList();
+    saveState();
+  }
+
+  function toggleReferenceLayer(id){
+    var rec = referenceLayers.find(function(r){ return r.id === id; });
+    if (!rec) return;
+    rec.visible = !rec.visible;
+    if (rec.visible) { rec.leafletLayer.addTo(map); }
+    else { map.removeLayer(rec.leafletLayer); }
+    renderReferenceList();
+    saveState();
+  }
+
+  function renderReferenceList(){
+    var el = document.getElementById('ref-layer-list');
+    el.innerHTML = '';
+    if (referenceLayers.length === 0){
+      el.innerHTML = '<p class="empty-hint">No reference layers yet.</p>';
+      return;
+    }
+    referenceLayers.forEach(function(rec){
+      var item = document.createElement('div');
+      item.className = 'layer-item';
+      item.innerHTML =
+        '<div class="layer-top">' +
+          '<label class="switch"><input type="checkbox" ' + (rec.visible ? 'checked' : '') + '><span class="slider"></span></label>' +
+          '<div class="layer-name" title="' + escapeHtml(rec.name) + '">' + escapeHtml(rec.name) + '</div>' +
+        '</div>' +
+        '<div class="layer-meta" title="' + escapeHtml(rec.url) + '">' + escapeHtml(truncateMiddle(rec.url, 40)) + '</div>' +
+        '<div class="layer-actions"><button class="small danger">Remove</button></div>';
+      item.querySelector('input[type=checkbox]').addEventListener('change', function(){ toggleReferenceLayer(rec.id); });
+      item.querySelector('button.danger').addEventListener('click', function(){ removeReferenceLayer(rec.id); });
+      el.appendChild(item);
+    });
+  }
+
+  /* ---------------- jurisdiction layers (editable) ---------------- */
+  function addJurisLayer(name, color, geojsonFeatures, skipSave){
+    var fg = L.featureGroup().addTo(map);
+    var rec = { id:newId(), name:name, color:color, visible:true, featureGroup:fg };
+    jurisLayers.push(rec);
+
+    if (geojsonFeatures && geojsonFeatures.length){
+      geojsonFeatures.forEach(function(feature){
+        var layer = L.geoJSON(feature, { style:{ color: color, weight:2, fillOpacity:0.18 } }).getLayers()[0];
+        if (layer){
+          if (feature.properties){
+            layer._jm_name = feature.properties.name || '';
+            layer._jm_notes = feature.properties.notes || '';
+          }
+          bindShapePopup(layer, rec);
+          fg.addLayer(layer);
+        }
+      });
+    }
+
+    renderJurisList();
+    if (jurisLayers.length === 1 && activeJurisId === null) setActiveJuris(rec.id);
+    if (!skipSave) saveState();
+    return rec;
+  }
+
+  function removeJurisLayer(id){
+    var rec = jurisLayers.find(function(r){ return r.id === id; });
+    if (!rec) return;
+    if (!confirm('Delete layer "' + rec.name + '" and everything drawn on it? This cannot be undone.')) return;
+    map.removeLayer(rec.featureGroup);
+    jurisLayers = jurisLayers.filter(function(r){ return r.id !== id; });
+    if (activeJurisId === id) activeJurisId = jurisLayers.length ? jurisLayers[0].id : null;
+    renderJurisList();
+    rebuildDrawControl();
+    saveState();
+  }
+
+  function toggleJurisLayer(id){
+    var rec = jurisLayers.find(function(r){ return r.id === id; });
+    if (!rec) return;
+    rec.visible = !rec.visible;
+    if (rec.visible) map.addLayer(rec.featureGroup);
+    else map.removeLayer(rec.featureGroup);
+    renderJurisList();
+    saveState();
+  }
+
+  function setActiveJuris(id){
+    activeJurisId = id;
+    renderJurisList();
+    rebuildDrawControl();
+  }
+
+  function rebuildDrawControl(){
+    if (drawControl){ map.removeControl(drawControl); drawControl = null; }
+    var rec = jurisLayers.find(function(r){ return r.id === activeJurisId; });
+    if (!rec) return;
+    drawControl = new L.Control.Draw({
+      position:'topleft',
+      draw:{
+        polygon:{ shapeOptions:{ color: rec.color, weight:2, fillOpacity:0.18 } },
+        polyline:false,
+        rectangle:{ shapeOptions:{ color: rec.color, weight:2, fillOpacity:0.18 } },
+        circle:false,
+        circlemarker:false,
+        marker:false
+      },
+      edit:{ featureGroup: rec.featureGroup }
+    });
+    map.addControl(drawControl);
+  }
+
+  map.on(L.Draw.Event.CREATED, function(e){
+    var rec = jurisLayers.find(function(r){ return r.id === activeJurisId; });
+    if (!rec) return;
+    var layer = e.layer;
+    layer._jm_name = '';
+    layer._jm_notes = '';
+    bindShapePopup(layer, rec);
+    rec.featureGroup.addLayer(layer);
+    layer.openPopup();
+    saveState();
+  });
+  map.on(L.Draw.Event.EDITED, saveState);
+  map.on(L.Draw.Event.DELETED, saveState);
+
+  function bindShapePopup(layer, rec){
+    layer.on('click', function(){
+      var container = document.createElement('div');
+      container.innerHTML =
+        '<div style="min-width:200px;">' +
+          '<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;font-family:var(--mono);">' + escapeHtml(rec.name) + '</div>' +
+          '<input type="text" placeholder="Name (e.g. Sector 4)" value="' + escapeHtml(layer._jm_name||'') + '" style="margin-bottom:6px;">' +
+          '<textarea placeholder="Notes…">' + escapeHtml(layer._jm_notes||'') + '</textarea>' +
+          '<div style="display:flex;gap:6px;margin-top:8px;">' +
+            '<button class="primary small save-btn">Save</button>' +
+            '<button class="danger small del-btn">Delete shape</button>' +
+          '</div>' +
+        '</div>';
+      var nameInput = container.querySelector('input');
+      var notesInput = container.querySelector('textarea');
+      container.querySelector('.save-btn').addEventListener('click', function(){
+        layer._jm_name = nameInput.value;
+        layer._jm_notes = notesInput.value;
+        layer.closePopup();
+        saveState();
+        setStatus('Saved "' + (layer._jm_name || 'unnamed shape') + '".');
+      });
+      container.querySelector('.del-btn').addEventListener('click', function(){
+        rec.featureGroup.removeLayer(layer);
+        saveState();
+      });
+      layer.bindPopup(container).openPopup();
+    });
+  }
+
+  function renderJurisList(){
+    var el = document.getElementById('juris-layer-list');
+    el.innerHTML = '';
+    if (jurisLayers.length === 0){
+      el.innerHTML = '<p class="empty-hint">No jurisdiction layers yet.</p>';
+      return;
+    }
+    jurisLayers.forEach(function(rec){
+      var count = rec.featureGroup.getLayers().length;
+      var item = document.createElement('div');
+      item.className = 'layer-item' + (rec.id === activeJurisId ? ' active' : '');
+      item.innerHTML =
+        '<div class="layer-top">' +
+          '<label class="switch"><input type="checkbox" ' + (rec.visible ? 'checked' : '') + '><span class="slider"></span></label>' +
+          '<div class="swatch" style="background:' + rec.color + '"></div>' +
+          '<div class="layer-name">' + escapeHtml(rec.name) + '</div>' +
+          '<div class="count-badge">' + count + '</div>' +
+        '</div>' +
+        '<div class="layer-actions">' +
+          '<button class="small draw-btn">' + (rec.id === activeJurisId ? 'Drawing on this layer' : 'Draw on this layer') + '</button>' +
+          '<button class="small danger del-btn">Delete layer</button>' +
+        '</div>';
+      item.querySelector('input[type=checkbox]').addEventListener('change', function(){ toggleJurisLayer(rec.id); });
+      item.querySelector('.draw-btn').addEventListener('click', function(){ setActiveJuris(rec.id); });
+      item.querySelector('.del-btn').addEventListener('click', function(){ removeJurisLayer(rec.id); });
+      el.appendChild(item);
+    });
+  }
+
+  /* ---------------- persistence ---------------- */
+  function saveState(){
+    try {
+      var data = {
+        version:1,
+        referenceLayers: referenceLayers.map(function(r){ return { name:r.name, url:r.url, visible:r.visible }; }),
+        jurisLayers: jurisLayers.map(function(r){
+          return {
+            name:r.name,
+            color:r.color,
+            visible:r.visible,
+            geojson: r.featureGroup.toGeoJSON().features.map(function(f, i){
+              var layer = r.featureGroup.getLayers()[i];
+              f.properties = f.properties || {};
+              f.properties.name = layer ? (layer._jm_name || '') : '';
+              f.properties.notes = layer ? (layer._jm_notes || '') : '';
+              return f;
+            })
+          };
+        })
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      setStatus('Saved to browser — ' + new Date().toLocaleTimeString());
+    } catch(err){
+      setStatus('Auto-save failed: ' + err.message);
+    }
+  }
+
+  function loadState(data){
+    // clear existing
+    referenceLayers.forEach(function(r){ if (r.leafletLayer) map.removeLayer(r.leafletLayer); });
+    jurisLayers.forEach(function(r){ map.removeLayer(r.featureGroup); });
+    referenceLayers = [];
+    jurisLayers = [];
+    activeJurisId = null;
+
+    (data.referenceLayers || []).forEach(function(r){ addReferenceLayer(r.name, r.url, r.visible, true); });
+    (data.jurisLayers || []).forEach(function(r){ addJurisLayer(r.name, r.color, r.geojson, true); });
+
+    if (jurisLayers.length) setActiveJuris(jurisLayers[0].id);
+    renderReferenceList();
+    renderJurisList();
+  }
+
+  function loadFromStorage(){
+    var raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw){
+      // first run defaults
+      addReferenceLayer('City boundaries (Payne Co. Assessor)', 'https://pro.paynecountyassessor.org/arcgis/rest/services/City_Boundaries/MapServer/0', true, true);
+      addJurisLayer('Law Enforcement', '#5fa8d3', [], true);
+      addJurisLayer('Fire', '#d97757', [], true);
+      addJurisLayer('Medical / EMS', '#7fbf6a', [], true);
+      setActiveJuris(jurisLayers[0].id);
+      renderReferenceList();
+      renderJurisList();
+      setStatus('Ready — first run, default layers created.');
+      return;
+    }
+    try {
+      loadState(JSON.parse(raw));
+      setStatus('Loaded saved map.');
+    } catch(err){
+      setStatus('Could not read saved data: ' + err.message);
+    }
+  }
+
+  /* ---------------- UI wiring ---------------- */
+  document.getElementById('ref-add-btn').addEventListener('click', function(){
+    var name = document.getElementById('ref-name-input').value.trim();
+    var url = document.getElementById('ref-url-input').value.trim();
+    if (!url){ setStatus('Paste a layer URL first.'); return; }
+    if (!name) name = url;
+    addReferenceLayer(name, url, true);
+    document.getElementById('ref-name-input').value = '';
+    document.getElementById('ref-url-input').value = '';
+  });
+
+  document.getElementById('juris-add-btn').addEventListener('click', function(){
+    var name = document.getElementById('juris-name-input').value.trim();
+    var color = document.getElementById('juris-color-input').value;
+    if (!name){ setStatus('Name the new layer first.'); return; }
+    var rec = addJurisLayer(name, color, []);
+    setActiveJuris(rec.id);
+    document.getElementById('juris-name-input').value = '';
+  });
+
+  document.getElementById('export-btn').addEventListener('click', function(){
+    var data = {
+      version:1,
+      exportedAt: new Date().toISOString(),
+      referenceLayers: referenceLayers.map(function(r){ return { name:r.name, url:r.url, visible:r.visible }; }),
+      jurisLayers: jurisLayers.map(function(r){
+        return {
+          name:r.name, color:r.color, visible:r.visible,
+          geojson: r.featureGroup.toGeoJSON().features.map(function(f, i){
+            var layer = r.featureGroup.getLayers()[i];
+            f.properties = f.properties || {};
+            f.properties.name = layer ? (layer._jm_name || '') : '';
+            f.properties.notes = layer ? (layer._jm_notes || '') : '';
+            return f;
+          })
+        };
+      })
+    };
+    var blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'jurisdiction-map-backup-' + new Date().toISOString().slice(0,10) + '.json';
+    a.click();
+    setStatus('Backup downloaded.');
+  });
+
+  document.getElementById('import-btn').addEventListener('click', function(){
+    document.getElementById('import-file').click();
+  });
+  document.getElementById('import-file').addEventListener('change', function(e){
+    var file = e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(){
+      try {
+        var data = JSON.parse(reader.result);
+        if (!confirm('Import will replace everything currently on the map. Continue?')) return;
+        loadState(data);
+        saveState();
+        setStatus('Imported ' + file.name);
+      } catch(err){
+        setStatus('Import failed: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  });
+
+  /* ---------------- search (Nominatim) ---------------- */
+  document.getElementById('search-btn').addEventListener('click', doSearch);
+  document.getElementById('search-input').addEventListener('keydown', function(e){
+    if (e.key === 'Enter') doSearch();
+  });
+
+  function doSearch(){
+    var q = document.getElementById('search-input').value.trim();
+    var resultsEl = document.getElementById('search-results');
+    if (!q){ return; }
+    resultsEl.innerHTML = '<p class="empty-hint">Searching…</p>';
+    var url = 'https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=us&q=' +
+      encodeURIComponent(q + ', Payne County, Oklahoma');
+    fetch(url, { headers: { 'Accept':'application/json' } })
+      .then(function(r){ return r.json(); })
+      .then(function(results){
+        resultsEl.innerHTML = '';
+        if (!results.length){
+          resultsEl.innerHTML = '<p class="empty-hint">No matches. Try a different search.</p>';
+          return;
+        }
+        results.forEach(function(r){
+          var div = document.createElement('div');
+          div.className = 'search-result';
+          div.textContent = r.display_name;
+          div.addEventListener('click', function(){
+            map.setView([parseFloat(r.lat), parseFloat(r.lon)], 15);
+            resultsEl.innerHTML = '';
+            document.getElementById('search-input').value = '';
+          });
+          resultsEl.appendChild(div);
+        });
+      })
+      .catch(function(err){
+        resultsEl.innerHTML = '<p class="empty-hint">Search failed: ' + escapeHtml(err.message) + '</p>';
+      });
+  }
+
+  /* ---------------- helpers ---------------- */
+  function escapeHtml(s){
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+      return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+    });
+  }
+  function truncateMiddle(s, max){
+    if (s.length <= max) return s;
+    var half = Math.floor((max-3)/2);
+    return s.slice(0, half) + '...' + s.slice(s.length-half);
+  }
+
+  /* ---------------- boot ---------------- */
+  loadFromStorage();
+
+})();
+</script>
+</body>
+</html>
