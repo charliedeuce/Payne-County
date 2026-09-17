@@ -363,6 +363,7 @@
     if (m) {
       return L.esri.featureLayer({
         url: trimmed,
+        style: function(){ return { color:'#5a6a72', weight:1, fillOpacity:0, opacity:0.8 }; },
         onEachFeature: function(feature, layer){
           layer.bindPopup(attributePopupHtml(feature.properties), { maxWidth:300, maxHeight:260 });
         }
@@ -374,6 +375,7 @@
     // fallback: try featureLayer directly
     return L.esri.featureLayer({
       url: trimmed,
+      style: function(){ return { color:'#5a6a72', weight:1, fillOpacity:0, opacity:0.8 }; },
       onEachFeature: function(feature, layer){
         layer.bindPopup(attributePopupHtml(feature.properties), { maxWidth:300, maxHeight:260 });
       }
